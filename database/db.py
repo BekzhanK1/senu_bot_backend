@@ -74,6 +74,10 @@ async def add_user(telegram_id: int, username: str, full_name: str):
             session.add(new_user)
             await session.commit()
 
+async def get_user(telegram_id: int) -> User | None:
+    async with async_session() as session:
+        return await session.get(User, telegram_id)
+
 async def create_request(user_id: int, request_type: str, content: str):
     async with async_session() as session:
         new_request = Request(user_id=user_id, request_type=request_type, content=content)

@@ -1,11 +1,13 @@
 import os
 import json
+from typing import Any, Awaitable, Callable, Dict
 from aiogram import Router, F, Bot
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, ContentType
 from aiogram.fsm.context import FSMContext
 
-from database.db import add_user, create_request, get_random_tip, get_user_requests
+from database.db import add_user, create_request, get_random_tip, get_user_requests, get_user
 from keyboards.reply import get_main_menu
 from keyboards.inline import get_game_kb, get_question_kb, get_admin_resolve_kb, get_back_kb, get_webapp_kb
 from handlers.fsm_forms import MeetingForm, QuestionForm
@@ -14,14 +16,44 @@ user_router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-domain.com/calendar")
 
+
+class RequireStartMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
+        event: Any,
+        data: Dict[str, Any]
+    ) -> Any:
+        user = getattr(event, "from_user", None)
+        if not user:
+            return await handler(event, data)
+
+        if isinstance(event, Message):
+            text = event.text or ""
+            if text.startswith("/start"):
+                return await handler(event, data)
+
+        existing_user = await get_user(user.id)
+        if existing_user:
+            return await handler(event, data)
+
+        if isinstance(event, CallbackQuery):
+            await event.answer("Сначала нажми /start в чате с ботом.", show_alert=True)
+            await event.message.answer("👋 Для начала работы отправь команду /start.")
+            return None
+
+        if isinstance(event, Message):
+            await event.answer("👋 Для начала работы отправь команду /start.")
+            return None
+
+        return await handler(event, data)
+
+
+user_router.message.middleware(RequireStartMiddleware())
+user_router.callback_query.middleware(RequireStartMiddleware())
+
 @user_router.message(CommandStart())
 async def cmd_start(message: Message):
-    await add_user(
-        telegram_id=message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name
-    )
-    
     welcome_text = (
         f"🌟 <b>Привет, {message.from_user.first_name}!</b>\n\n"
         "Я твой цифровой помощник в мире SENU. "
