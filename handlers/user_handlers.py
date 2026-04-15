@@ -31,6 +31,21 @@ class RequireStartMiddleware(BaseMiddleware):
         if isinstance(event, Message):
             text = event.text or ""
             if text.startswith("/start"):
+                await add_user(
+                    telegram_id=user.id,
+                    username=user.username,
+                    full_name=user.full_name
+                )
+                return await handler(event, data)
+
+            # Mini App sendData arrives as WEB_APP_DATA message.
+            # Auto-register here so requests are not blocked by missing user row.
+            if event.content_type == ContentType.WEB_APP_DATA:
+                await add_user(
+                    telegram_id=user.id,
+                    username=user.username,
+                    full_name=user.full_name
+                )
                 return await handler(event, data)
 
         existing_user = await get_user(user.id)
@@ -103,6 +118,8 @@ async def process_webapp_data(message: Message, bot: Bot):
             admin_msg = f"🔔 <b>Новый вопрос ({sender})</b>\nТекст: {text}"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
             await message.answer("🚀 <b>Твой вопрос отправлен ментору!</b>", parse_mode="HTML")
+        else:
+            await message.answer("❌ Неизвестный тип запроса из Mini App.")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка при обработке данных: {e}")
