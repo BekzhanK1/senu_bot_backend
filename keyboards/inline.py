@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 def get_webapp_kb(url: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Открыть календарь", web_app=WebAppInfo(url=url))]
+        [InlineKeyboardButton(text="📅 Открыть запись на встречу", web_app=WebAppInfo(url=url))]
     ])
 
 def get_game_kb():

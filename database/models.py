@@ -1,10 +1,13 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import BigInteger, String, Text, ForeignKey, DateTime, func
+
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
 
 class Base(DeclarativeBase):
     pass
+
 
 class User(Base):
     __tablename__ = "users"
@@ -13,6 +16,12 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(128))
     joined_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    # v2 profile / consent (nullable for backward compatibility)
+    locale: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    faculty: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    study_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    analytics_consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    crisis_consent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     requests = relationship("Request", back_populates="user")
 
@@ -42,4 +51,16 @@ class BlockedUser(Base):
 
     telegram_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), primary_key=True)
     reason: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+class MentorEvent(Base):
+    """Событие от ментора: рассылка всем студентам с названием, местом, описанием."""
+
+    __tablename__ = "mentor_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    place: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

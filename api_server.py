@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from html import escape
 from typing import Literal, Optional
 
 from aiogram import Bot
@@ -9,17 +10,22 @@ from pydantic import BaseModel, Field
 from database.db import (
     add_user,
     block_user,
+    create_mentor_event,
     create_request,
     get_all_users,
+    get_all_users_ids,
     get_blocked_user_ids,
+    get_request_by_id,
+    get_requests_for_admin,
     get_user,
     get_user_requests,
-    get_requests_for_admin,
     is_user_blocked,
     resolve_request,
     unblock_user,
 )
 from keyboards.inline import get_admin_resolve_kb
+from utils.mentor_event_message import format_event_notification_html
+from utils.student_notifications import notify_request_resolved
 
 
 class TgUserPayload(BaseModel):
@@ -85,6 +91,30 @@ class AdminUsersResponse(BaseModel):
 class AdminUserActionRequest(BaseModel):
     tg_user_id: int
     reason: Optional[str] = None
+
+
+class AdminReplyRequest(BaseModel):
+    tg_user_id: int
+    text: str = Field(min_length=1, max_length=3500)
+
+
+class AdminEventCreateRequest(BaseModel):
+    tg_user_id: int
+    title: str = Field(min_length=2, max_length=256)
+    place: str = Field(min_length=2, max_length=256)
+    description: str = Field(min_length=5, max_length=3500)
+
+
+class AdminEventCreateResponse(BaseModel):
+    ok: bool
+    event_id: int
+    delivered: int
+    total: int
+
+
+class AdminBroadcastRequest(BaseModel):
+    tg_user_id: int
+    text: str = Field(min_length=1, max_length=3900)
 
 class ProfileRequest(BaseModel):
     tg_user_id: int
@@ -263,8 +293,83 @@ def create_api_app(bot: Bot) -> FastAPI:
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
         verify_admin_user(payload.tg_user_id)
-        await resolve_request(request_id)
+        req = await get_request_by_id(request_id)
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+        if req.status != "resolved":
+            await resolve_request(request_id)
+            await notify_request_resolved(
+                bot,
+                request_id=request_id,
+                user_telegram_id=req.user_id,
+                request_type=req.request_type,
+            )
         return {"ok": True}
+
+    @app.post("/api/admin/requests/{request_id}/reply")
+    async def reply_admin_request(
+        request_id: int,
+        payload: AdminReplyRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        req = await get_request_by_id(request_id)
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+        body = escape(payload.text.strip())
+        reply_text = (
+            f"<b>💬 Сообщение от ментора:</b>\n\n{body}\n\n"
+            "<i>Когда вопрос будет полностью закрыт, ментор отметит заявку решённой — "
+            "я пришлю отдельное уведомление.</i>"
+        )
+        await bot.send_message(req.user_id, reply_text, parse_mode="HTML")
+        return {"ok": True}
+
+    @app.post("/api/admin/events", response_model=AdminEventCreateResponse)
+    async def create_admin_event(
+        payload: AdminEventCreateRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> AdminEventCreateResponse:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        title = payload.title.strip()[:256]
+        place = payload.place.strip()[:256]
+        description = payload.description.strip()[:3500]
+        announcement = format_event_notification_html(title=title, place=place, description=description)
+        if len(announcement) > 4000:
+            raise HTTPException(status_code=400, detail="Announcement text too long for Telegram")
+        event_id = await create_mentor_event(title=title, place=place, description=description)
+        user_ids = await get_all_users_ids()
+        delivered = 0
+        for uid in user_ids:
+            try:
+                await bot.send_message(uid, announcement, parse_mode="HTML")
+                delivered += 1
+            except Exception:
+                pass
+        return AdminEventCreateResponse(ok=True, event_id=event_id, delivered=delivered, total=len(user_ids))
+
+    @app.post("/api/admin/broadcast")
+    async def admin_broadcast(
+        payload: AdminBroadcastRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, bool | int]:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        text = escape(payload.text.strip())
+        broadcast_html = f"📢 <b>Объявление от ментора:</b>\n\n{text}"
+        if len(broadcast_html) > 4096:
+            raise HTTPException(status_code=400, detail="Broadcast text too long")
+        user_ids = await get_all_users_ids()
+        delivered = 0
+        for uid in user_ids:
+            try:
+                await bot.send_message(uid, broadcast_html, parse_mode="HTML")
+                delivered += 1
+            except Exception:
+                pass
+        return {"ok": True, "delivered": delivered, "total": len(user_ids)}
 
     @app.get("/api/admin/users", response_model=AdminUsersResponse)
     async def list_admin_users(

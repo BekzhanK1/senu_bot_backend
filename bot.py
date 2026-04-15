@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import uvicorn
 
 from database.db import init_db
+from handlers.crisis_handlers import crisis_router
 from handlers.user_handlers import user_router
 from handlers.admin_handlers import admin_router
 from api_server import create_api_app
@@ -14,8 +15,9 @@ from api_server import create_api_app
 async def set_main_menu(bot: Bot):
     main_menu_commands = [
         BotCommand(command='/start', description='Запустить бота'),
+        BotCommand(command='/crisis', description='Если тяжело сейчас'),
         BotCommand(command='/profile', description='Мои заявки'),
-        BotCommand(command='/tip', description='Совет дня')
+        BotCommand(command='/tip', description='Совет дня'),
     ]
     await bot.set_my_commands(main_menu_commands)
 
@@ -38,6 +40,7 @@ async def main():
     
     await set_main_menu(bot)
     
+    dp.include_router(crisis_router)
     dp.include_router(admin_router)
     dp.include_router(user_router)
 

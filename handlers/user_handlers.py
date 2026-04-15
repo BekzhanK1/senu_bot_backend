@@ -1,81 +1,23 @@
 import os
 import json
 import logging
-from typing import Any, Awaitable, Callable, Dict
 from aiogram import Router, F, Bot
-from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, ContentType
 from aiogram.fsm.context import FSMContext
 
-from database.db import add_user, create_request, get_random_tip, get_user_requests, get_user, is_user_blocked
-from keyboards.reply import get_main_menu
-from keyboards.inline import get_game_kb, get_question_kb, get_admin_resolve_kb, get_back_kb, get_webapp_kb
+from database.db import create_request, get_random_tip, get_user_requests, get_user, is_user_blocked
+from handlers.auth_middleware import RequireStartMiddleware
 from handlers.fsm_forms import MeetingForm, QuestionForm
+from keyboards.inline import get_admin_resolve_kb, get_back_kb, get_game_kb, get_question_kb, get_webapp_kb
+from keyboards.reply import get_main_menu
+from utils.request_labels import format_request_type_ru
+from utils.ux_copy import NOTIFY_ON_STATUS_CHANGE
 
 user_router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-domain.com/calendar")
 logger = logging.getLogger(__name__)
-
-
-class RequireStartMiddleware(BaseMiddleware):
-    async def __call__(
-        self,
-        handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
-        event: Any,
-        data: Dict[str, Any]
-    ) -> Any:
-        user = getattr(event, "from_user", None)
-        if not user:
-            return await handler(event, data)
-
-        if await is_user_blocked(user.id):
-            logger.info("Blocked user attempted interaction: user_id=%s", user.id)
-            if isinstance(event, CallbackQuery):
-                await event.answer("Ваш доступ ограничен администратором.", show_alert=True)
-                return None
-            if isinstance(event, Message):
-                await event.answer("⛔ Ваш доступ к боту ограничен администратором.")
-                return None
-            return None
-
-        if isinstance(event, Message):
-            text = event.text or ""
-            if text.startswith("/start"):
-                await add_user(
-                    telegram_id=user.id,
-                    username=user.username,
-                    full_name=user.full_name
-                )
-                logger.info("User registered via /start: user_id=%s username=%s", user.id, user.username)
-                return await handler(event, data)
-
-            # Mini App sendData arrives as WEB_APP_DATA message.
-            # Auto-register here so requests are not blocked by missing user row.
-            if event.content_type == ContentType.WEB_APP_DATA:
-                await add_user(
-                    telegram_id=user.id,
-                    username=user.username,
-                    full_name=user.full_name
-                )
-                logger.info("User registered via WEB_APP_DATA: user_id=%s username=%s", user.id, user.username)
-                return await handler(event, data)
-
-        existing_user = await get_user(user.id)
-        if existing_user:
-            return await handler(event, data)
-
-        if isinstance(event, CallbackQuery):
-            await event.answer("Сначала нажми /start в чате с ботом.", show_alert=True)
-            await event.message.answer("👋 Для начала работы отправь команду /start.")
-            return None
-
-        if isinstance(event, Message):
-            await event.answer("👋 Для начала работы отправь команду /start.")
-            return None
-
-        return await handler(event, data)
 
 
 user_router.message.middleware(RequireStartMiddleware())
@@ -85,14 +27,13 @@ user_router.callback_query.middleware(RequireStartMiddleware())
 async def cmd_start(message: Message):
     welcome_text = (
         f"🌟 <b>Привет, {message.from_user.first_name}!</b>\n\n"
-        "Я твой цифровой помощник в мире SENU. "
-        "Здесь ты можешь стать лучшей версией себя вместе с ментором Айнур! ✨\n\n"
-        "🚀 <b>Что я умею:</b>\n"
-        "• Записывать на личные встречи\n"
-        "• Организовывать игры «108»\n"
-        "• Давать полезные советы на каждый день\n"
-        "• Отвечать на твои вопросы (даже анонимно!)\n\n"
-        "Выбери нужный раздел в меню ниже 👇"
+        "Я бот SENU Buddy: помогаю связаться с ментором без лишних шагов. ✨\n\n"
+        "🚀 <b>Что здесь можно сделать:</b>\n"
+        "• <b>🆘 Мне тяжело сейчас</b> — короткая поддержка и связь с ментором\n"
+        "• Записаться на встречу или задать вопрос (в т.ч. анонимно)\n"
+        "• Игра «108», совет дня, контакты PCS\n\n"
+        "Все заявки идут ментору; <b>когда статус заявки изменится, я напишу тебе сюда</b>.\n\n"
+        "Выбери раздел в меню ниже 👇"
     )
     await message.answer(welcome_text, reply_markup=get_main_menu(), parse_mode="HTML")
 
@@ -125,7 +66,10 @@ async def process_webapp_data(message: Message, bot: Bot):
             admin_msg = f"🔔 <b>Новая запись: Встреча</b>\nОт: {user.full_name} ({username})\n<b>{day} в {time}</b>"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
             logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
-            await message.answer(f"✨ <b>Запись подтверждена!</b>\nЖдем тебя {day} в {time}.", parse_mode="HTML")
+            await message.answer(
+                f"✨ <b>Запись подтверждена!</b>\nЖдём тебя {day} в {time}.{NOTIFY_ON_STATUS_CHANGE}",
+                parse_mode="HTML",
+            )
             
         elif data_type == 'game_108':
             req_id = await create_request(user.id, "game_108", "Заявка через Mini App")
@@ -133,7 +77,11 @@ async def process_webapp_data(message: Message, bot: Bot):
             admin_msg = f"🔔 <b>Новая заявка: Игра 108</b>\nОт: {user.full_name} ({username})"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
             logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
-            await message.answer("🙌 <b>Заявка на игру 108 принята!</b>\nАйнур скоро свяжется с тобой.", parse_mode="HTML")
+            await message.answer(
+                "🙌 <b>Заявка на игру «108» принята!</b>\nМентор скоро свяжется с тобой."
+                + NOTIFY_ON_STATUS_CHANGE,
+                parse_mode="HTML",
+            )
 
         elif data_type == 'question':
             text = data.get('text')
@@ -146,7 +94,10 @@ async def process_webapp_data(message: Message, bot: Bot):
             admin_msg = f"🔔 <b>Новый вопрос ({sender})</b>\nТекст: {text}"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
             logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
-            await message.answer("🚀 <b>Твой вопрос отправлен ментору!</b>", parse_mode="HTML")
+            await message.answer(
+                "🚀 <b>Вопрос отправлен ментору!</b>" + NOTIFY_ON_STATUS_CHANGE,
+                parse_mode="HTML",
+            )
         else:
             logger.warning("Unknown WEB_APP_DATA type: user_id=%s payload=%s", user.id, data)
             await message.answer("❌ Неизвестный тип запроса из Mini App.")
@@ -191,15 +142,26 @@ async def tip_of_the_day(message: Message):
 @user_router.message(F.text == "👤 Мой профиль")
 @user_router.message(Command("profile"))
 async def my_profile(message: Message):
-    requests = await get_user_requests(message.from_user.id)
+    requests = await get_user_requests(message.from_user.id, limit=15)
     text = f"👤 <b>Профиль: {message.from_user.full_name}</b>\n\n"
     if not requests:
-        text += "У тебя пока нет активных заявок."
+        text += "Пока нет заявок. Запись, вопрос или «🆘 Мне тяжело сейчас» — всё из меню ниже."
     else:
-        text += "<b>Твои последние заявки:</b>\n"
+        text += "<b>Твои заявки (новые сверху):</b>\n"
         for req in requests:
-            status_emoji = "⏳" if req.status == "pending" else "✅"
-            text += f"\n{status_emoji} {req.request_type} — {req.created_at.strftime('%d.%m')}"
+            if req.status == "pending":
+                status_emoji = "⏳"
+                status_ru = "в обработке"
+            else:
+                status_emoji = "✅"
+                status_ru = "закрыта"
+            label = format_request_type_ru(req.request_type)
+            text += (
+                f"\n{status_emoji} <b>№{req.id}</b> {label} — {status_ru}, "
+                f"{req.created_at.strftime('%d.%m %H:%M')}"
+            )
+        text += "\n\n<i>Пока заявка «в обработке», ментор может написать тебе ответом в чат. "
+        text += "Когда закроет заявку — придёт уведомление.</i>"
     await message.answer(text, parse_mode="HTML")
 
 # --- Запись на встречу (Mini App + Fallback) ---
@@ -208,15 +170,16 @@ async def my_profile(message: Message):
 async def meeting_start(message: Message, state: FSMContext):
     if "your-domain.com" not in WEBAPP_URL:
         await message.answer(
-            "🗓 <b>Выберите удобное время в календаре:</b>",
+            "🗓 <b>Запись на встречу</b>\n\n"
+            "Нажми кнопку — откроется форма. После отправки ментор увидит заявку и свяжется с тобой.",
             reply_markup=get_webapp_kb(WEBAPP_URL),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
     else:
         await state.set_state(MeetingForm.waiting_for_topic)
         await message.answer(
             "✍️ <b>О чем ты хочешь поговорить?</b>\n(Академические вопросы, личные цели или просто поддержка)\n\n"
-            "<i>(P.S. Когда админ настроит Mini App, здесь появится календарь!)</i>", 
+            "<i>Если у вас включён Mini App по ссылке в .env, вместо этих шагов откроется короткая форма записи.</i>",
             reply_markup=get_back_kb(),
             parse_mode="HTML"
         )
@@ -234,7 +197,10 @@ async def meeting_time(message: Message, state: FSMContext, bot: Bot):
     req_id = await create_request(message.from_user.id, "meeting", content)
     await bot.send_message(ADMIN_ID, f"🔔 <b>Новая запись:</b>\n{content}", reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
     await state.clear()
-    await message.answer("✨ <b>Готово!</b> Айнур свяжется с тобой совсем скоро.", parse_mode="HTML")
+    await message.answer(
+        "✨ <b>Готово!</b> Ментор свяжется с тобой в ближайшее время." + NOTIFY_ON_STATUS_CHANGE,
+        parse_mode="HTML",
+    )
 
 # --- Остальные обработчики (Вопросы, Игра, PCS) ---
 
@@ -253,7 +219,10 @@ async def wanna_play(callback: CallbackQuery, bot: Bot):
     req_id = await create_request(callback.from_user.id, "game_108", "Хочет сыграть")
     await bot.send_message(ADMIN_ID, f"🔔 <b>Игра 108:</b> от {callback.from_user.full_name}", reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
     await callback.answer("Заявка отправлена! 🎲")
-    await callback.message.answer("🙌 <b>Айнур получила твой запрос на игру!</b>", parse_mode="HTML")
+    await callback.message.answer(
+        "🙌 <b>Запрос на игру отправлен ментору!</b>" + NOTIFY_ON_STATUS_CHANGE,
+        parse_mode="HTML",
+    )
 
 @user_router.message(F.text == "❓ Задать вопрос")
 async def question_start(message: Message):
@@ -278,7 +247,10 @@ async def process_question_text(message: Message, state: FSMContext, bot: Bot):
     sender = "🕵️ Анонимно" if data['is_anonymous'] else f"👤 {message.from_user.full_name}"
     await bot.send_message(ADMIN_ID, f"🔔 <b>Новый вопрос ({sender}):</b>\n{message.text}", reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
     await state.clear()
-    await message.answer("🚀 <b>Твой вопрос улетел к ментору!</b>", parse_mode="HTML")
+    await message.answer(
+        "🚀 <b>Вопрос отправлен ментору!</b>" + NOTIFY_ON_STATUS_CHANGE,
+        parse_mode="HTML",
+    )
 
 @user_router.callback_query(F.data == "cancel_fsm")
 async def cancel_fsm(callback: CallbackQuery, state: FSMContext):

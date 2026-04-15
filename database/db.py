@@ -1,8 +1,11 @@
 import os
 from urllib.parse import quote_plus
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import select, update, func
-from database.models import Base, User, Request, Tip, BlockedUser
+
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+import database.models_v2  # noqa: F401 — analytics_events + optional v2 tables
+from database.models import Base, BlockedUser, MentorEvent, Request, Tip, User
 
 def _build_db_url() -> str:
     # 1) Direct URL has highest priority
@@ -51,7 +54,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     # Добавим несколько советов, если их нет
     async with async_session() as session:
         result = await session.execute(select(Tip).limit(1))
@@ -61,10 +64,11 @@ async def init_db():
                 Tip(text="Стакан воды с утра поможет проснуться быстрее, чем кофе.", category="Health"),
                 Tip(text="Если задача кажется огромной, разбей ее на 5 маленьких шагов.", category="Productivity"),
                 Tip(text="Твое ментальное здоровье важнее любой оценки.", category="Mental Health"),
-                Tip(text="Попробуй технику 'Помидоро' для концентрации.", category="Productivity")
+                Tip(text="Попробуй технику 'Помидоро' для концентрации.", category="Productivity"),
             ]
             session.add_all(tips)
             await session.commit()
+
 
 async def add_user(telegram_id: int, username: str, full_name: str):
     async with async_session() as session:
@@ -77,6 +81,20 @@ async def add_user(telegram_id: int, username: str, full_name: str):
 async def get_user(telegram_id: int) -> User | None:
     async with async_session() as session:
         return await session.get(User, telegram_id)
+
+async def create_mentor_event(title: str, place: str, description: str) -> int:
+    async with async_session() as session:
+        event = MentorEvent(
+            title=title[:256],
+            place=place[:256],
+            description=description,
+        )
+        session.add(event)
+        await session.flush()
+        event_id = event.id
+        await session.commit()
+        return event_id
+
 
 async def create_request(user_id: int, request_type: str, content: str):
     async with async_session() as session:
