@@ -1,12 +1,51 @@
 import os
+from urllib.parse import quote_plus
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, update, func
 from database.models import Base, User, Request, Tip
 
-# Get DB_URL from environment or fallback to SQLite for local development
-DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:///senu_bot.db")
+def _build_db_url() -> str:
+    # 1) Direct URL has highest priority
+    db_url = os.getenv("DB_URL")
+    if db_url:
+        return db_url
 
-engine = create_async_engine(DB_URL, echo=False)
+    # 2) Compose URL from individual Postgres fields in .env
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD", "")
+    db_sslmode = os.getenv("DB_SSLMODE")
+
+    if db_host or db_name or db_user:
+        missing = [name for name, value in (
+            ("DB_HOST", db_host),
+            ("DB_NAME", db_name),
+            ("DB_USER", db_user),
+        ) if not value]
+        if missing:
+            raise RuntimeError(
+                f"Missing required DB settings: {', '.join(missing)}. "
+                "Set DB_URL or full DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD."
+            )
+
+        auth_part = quote_plus(db_user)
+        if db_password:
+            auth_part = f"{auth_part}:{quote_plus(db_password)}"
+
+        url = f"postgresql+asyncpg://{auth_part}@{db_host}:{db_port}/{db_name}"
+        if db_sslmode:
+            url = f"{url}?sslmode={quote_plus(db_sslmode)}"
+        return url
+
+    # 3) Backward-compatible fallback for local quick start
+    return "sqlite+aiosqlite:///senu_bot.db"
+
+
+DB_URL = _build_db_url()
+
+engine = create_async_engine(DB_URL, echo=False, pool_pre_ping=True)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def init_db():

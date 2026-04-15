@@ -5,11 +5,3 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      # Override only if unset in host .env (Compose reads .env for ${...} substitution)
-      DB_URL: ${DB_URL:-sqlite+aiosqlite:////app/data/senu_bot.db}
-    volumes:
-      - bot_data:/app/data
-
-volumes:
-  bot_data:
