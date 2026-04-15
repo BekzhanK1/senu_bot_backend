@@ -94,6 +94,10 @@ async def init_db():
             session.add_all(tips)
             await session.commit()
 
+    from database.meetings_repo import ensure_schedule_row
+
+    await ensure_schedule_row()
+
 
 async def add_user(telegram_id: int, username: str, full_name: str):
     async with async_session() as session:

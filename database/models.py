@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -64,3 +64,32 @@ class MentorEvent(Base):
     place: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+class MentorScheduleSettings(Base):
+    """Одна строка id=1: рабочие часы по дням недели и длина слота."""
+
+    __tablename__ = "mentor_schedule_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # {"0": {"enabled": true, "start": "10:00", "end": "18:00"}, ... "6": ...}  Mon=0
+    weekly_hours: Mapped[dict] = mapped_column("weekly_hours_json", JSON, default=dict)
+    slot_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Almaty")
+
+
+class MeetingBooking(Base):
+    """Реальная бронь слота: ожидает подтверждения → подтверждена → завершена."""
+
+    __tablename__ = "meeting_bookings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    student_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), index=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    end_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending_confirm", index=True)
+    topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("requests.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    user = relationship("User", foreign_keys=[student_user_id])

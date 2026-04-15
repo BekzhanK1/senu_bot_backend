@@ -1,7 +1,8 @@
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from html import escape
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from aiogram import Bot
 from fastapi import FastAPI, Header, HTTPException, Query
@@ -24,6 +25,23 @@ from database.db import (
     unblock_user,
 )
 from keyboards.inline import get_admin_resolve_kb
+from database.meetings_repo import (
+    complete_meeting_booking,
+    confirm_meeting_booking,
+    create_meeting_booking,
+    format_booking_local_human,
+    get_available_slots,
+    get_booking,
+    get_schedule_settings,
+    list_meeting_bookings,
+    update_schedule_settings,
+)
+from utils.meeting_messages import (
+    format_admin_new_booking,
+    format_meeting_completed_student,
+    format_meeting_confirmed_student,
+    format_meeting_pending_student,
+)
 from utils.mentor_event_message import format_event_notification_html
 from utils.student_notifications import notify_request_resolved
 
@@ -116,6 +134,25 @@ class AdminBroadcastRequest(BaseModel):
     tg_user_id: int
     text: str = Field(min_length=1, max_length=3900)
 
+
+class ScheduleUpdateRequest(BaseModel):
+    tg_user_id: int
+    weekly_hours: dict[str, dict[str, Any]]
+    slot_minutes: int = 30
+    timezone: str = Field(default="Asia/Almaty", max_length=64)
+
+
+class MeetingSlotBookRequest(BaseModel):
+    tg_user: TgUserPayload
+    start_at: str
+    end_at: str
+    topic: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AdminMeetingActionRequest(BaseModel):
+    tg_user_id: int
+
+
 class ProfileRequest(BaseModel):
     tg_user_id: int
     username: Optional[str] = None
@@ -138,6 +175,14 @@ class UserProfileResponse(BaseModel):
     requests: list[UserRequestItem]
 
 
+def _parse_iso_datetime(s: str) -> datetime:
+    raw = s.strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def create_api_app(bot: Bot) -> FastAPI:
     app = FastAPI(title="SENU Bot API", version="1.0.0")
     admin_id = int(os.getenv("ADMIN_ID", "0"))
@@ -154,6 +199,68 @@ def create_api_app(bot: Bot) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/meetings/availability")
+    async def meetings_availability(
+        on_date: str = Query(..., alias="date"),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        await verify_token(x_internal_token)
+        try:
+            day = date.fromisoformat(on_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date, use YYYY-MM-DD")
+        sched = await get_schedule_settings()
+        slots = await get_available_slots(day)
+        return {"slots": slots, "timezone": sched.timezone, "slot_minutes": sched.slot_minutes}
+
+    @app.post("/api/meetings/book")
+    async def meetings_book_slot(
+        payload: MeetingSlotBookRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        await verify_token(x_internal_token)
+        user = payload.tg_user
+        if await is_user_blocked(user.id):
+            raise HTTPException(status_code=403, detail="User is blocked")
+        await add_user(user.id, user.username, user.full_name)
+        try:
+            start_dt = _parse_iso_datetime(payload.start_at)
+            end_dt = _parse_iso_datetime(payload.end_at)
+            bid, rid = await create_meeting_booking(
+                student_id=user.id,
+                start_at=start_dt,
+                end_at=end_dt,
+                topic=payload.topic,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+        sched = await get_schedule_settings()
+        b = await get_booking(bid)
+        if b is None:
+            raise HTTPException(status_code=500, detail="Booking not found after create")
+        when_human = format_booking_local_human(b, sched.timezone)
+        topic = payload.topic
+        try:
+            await bot.send_message(
+                user.id,
+                format_meeting_pending_student(when_human=when_human, topic=topic),
+                parse_mode="HTML",
+            )
+            await bot.send_message(
+                admin_id,
+                format_admin_new_booking(
+                    booking_id=bid,
+                    student_name=user.full_name,
+                    when_human=when_human,
+                    topic=topic,
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return {"ok": True, "booking_id": bid, "request_id": rid}
 
     @app.post("/api/requests/question", response_model=ApiResponse)
     async def create_question_request(
@@ -414,6 +521,116 @@ def create_api_app(bot: Bot) -> FastAPI:
         await verify_token(x_internal_token)
         verify_admin_user(payload.tg_user_id)
         await unblock_user(telegram_id)
+        return {"ok": True}
+
+    @app.get("/api/admin/schedule")
+    async def admin_schedule_get(
+        tg_user_id: int = Query(...),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        await verify_token(x_internal_token)
+        verify_admin_user(tg_user_id)
+        row = await get_schedule_settings()
+        return {
+            "weekly_hours": row.weekly_hours,
+            "slot_minutes": row.slot_minutes,
+            "timezone": row.timezone,
+        }
+
+    @app.put("/api/admin/schedule")
+    async def admin_schedule_put(
+        payload: ScheduleUpdateRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        try:
+            weekly = {str(k): dict(v) for k, v in payload.weekly_hours.items()}
+            await update_schedule_settings(
+                weekly_hours=weekly,
+                slot_minutes=payload.slot_minutes,
+                tz_name=payload.timezone,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"ok": True}
+
+    @app.get("/api/admin/meetings")
+    async def admin_meetings_list(
+        tg_user_id: int = Query(...),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        await verify_token(x_internal_token)
+        verify_admin_user(tg_user_id)
+        sched = await get_schedule_settings()
+        tz = ZoneInfo(sched.timezone)
+        today = datetime.now(tz).date()
+        rows = await list_meeting_bookings(
+            date_from=today - timedelta(days=1),
+            date_to=today + timedelta(days=90),
+        )
+        items: list[dict[str, Any]] = []
+        for booking, full_name, uname in rows:
+            items.append(
+                {
+                    "id": booking.id,
+                    "student_user_id": booking.student_user_id,
+                    "student_full_name": full_name,
+                    "student_username": uname,
+                    "start_at": booking.start_at.isoformat(),
+                    "end_at": booking.end_at.isoformat(),
+                    "start_local_label": format_booking_local_human(booking, sched.timezone),
+                    "status": booking.status,
+                    "topic": booking.topic,
+                    "request_id": booking.request_id,
+                }
+            )
+        return {"items": items, "timezone": sched.timezone}
+
+    @app.post("/api/admin/meetings/{booking_id}/confirm")
+    async def admin_meeting_confirm(
+        booking_id: int,
+        payload: AdminMeetingActionRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        b = await confirm_meeting_booking(booking_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail="Booking not found or not pending")
+        sched = await get_schedule_settings()
+        when = format_booking_local_human(b, sched.timezone)
+        try:
+            await bot.send_message(
+                b.student_user_id,
+                format_meeting_confirmed_student(when_human=when),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return {"ok": True}
+
+    @app.post("/api/admin/meetings/{booking_id}/complete")
+    async def admin_meeting_complete(
+        booking_id: int,
+        payload: AdminMeetingActionRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        await verify_token(x_internal_token)
+        verify_admin_user(payload.tg_user_id)
+        b = await complete_meeting_booking(booking_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail="Booking not found or not confirmed")
+        sched = await get_schedule_settings()
+        when = format_booking_local_human(b, sched.timezone)
+        try:
+            await bot.send_message(
+                b.student_user_id,
+                format_meeting_completed_student(when_human=when),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
         return {"ok": True}
 
     return app
