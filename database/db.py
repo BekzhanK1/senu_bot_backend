@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy import select, update, func
 from database.models import Base, User, Request, Tip
 
-DB_URL = "sqlite+aiosqlite:///senu_bot.db"
+# Get DB_URL from environment or fallback to SQLite for local development
+DB_URL = os.getenv("DB_URL", "sqlite+aiosqlite:///senu_bot.db")
 
 engine = create_async_engine(DB_URL, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
