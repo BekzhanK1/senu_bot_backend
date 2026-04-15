@@ -2,7 +2,7 @@ import os
 from urllib.parse import quote_plus
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, update, func
-from database.models import Base, User, Request, Tip
+from database.models import Base, User, Request, Tip, BlockedUser
 
 def _build_db_url() -> str:
     # 1) Direct URL has highest priority
@@ -109,6 +109,25 @@ async def get_pending_requests():
         )
         return result.all()
 
+async def get_requests_for_admin(
+    request_type: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+):
+    async with async_session() as session:
+        query = (
+            select(Request, User.full_name, User.username)
+            .join(User)
+            .order_by(Request.created_at.desc())
+            .limit(limit)
+        )
+        if request_type:
+            query = query.where(Request.request_type == request_type)
+        if status:
+            query = query.where(Request.status == status)
+        result = await session.execute(query)
+        return result.all()
+
 async def get_request_by_id(req_id: int):
     async with async_session() as session:
         result = await session.execute(
@@ -130,3 +149,41 @@ async def get_user_requests(user_id: int, limit: int = 5):
             .limit(limit)
         )
         return result.scalars().all()
+
+
+async def get_all_users(limit: int = 500):
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).order_by(User.joined_at.desc()).limit(limit)
+        )
+        return result.scalars().all()
+
+
+async def is_user_blocked(telegram_id: int) -> bool:
+    async with async_session() as session:
+        blocked = await session.get(BlockedUser, telegram_id)
+        return blocked is not None
+
+
+async def block_user(telegram_id: int, reason: str | None = None):
+    async with async_session() as session:
+        blocked = await session.get(BlockedUser, telegram_id)
+        if blocked:
+            blocked.reason = reason
+        else:
+            session.add(BlockedUser(telegram_id=telegram_id, reason=reason))
+        await session.commit()
+
+
+async def unblock_user(telegram_id: int):
+    async with async_session() as session:
+        blocked = await session.get(BlockedUser, telegram_id)
+        if blocked:
+            await session.delete(blocked)
+            await session.commit()
+
+
+async def get_blocked_user_ids() -> set[int]:
+    async with async_session() as session:
+        result = await session.execute(select(BlockedUser.telegram_id))
+        return {row[0] for row in result.all()}

@@ -35,3 +35,11 @@ class Request(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
     user = relationship("User", back_populates="requests")
+
+
+class BlockedUser(Base):
+    __tablename__ = "blocked_users"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), primary_key=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

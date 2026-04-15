@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, ContentType
 from aiogram.fsm.context import FSMContext
 
-from database.db import add_user, create_request, get_random_tip, get_user_requests, get_user
+from database.db import add_user, create_request, get_random_tip, get_user_requests, get_user, is_user_blocked
 from keyboards.reply import get_main_menu
 from keyboards.inline import get_game_kb, get_question_kb, get_admin_resolve_kb, get_back_kb, get_webapp_kb
 from handlers.fsm_forms import MeetingForm, QuestionForm
@@ -29,6 +29,16 @@ class RequireStartMiddleware(BaseMiddleware):
         user = getattr(event, "from_user", None)
         if not user:
             return await handler(event, data)
+
+        if await is_user_blocked(user.id):
+            logger.info("Blocked user attempted interaction: user_id=%s", user.id)
+            if isinstance(event, CallbackQuery):
+                await event.answer("Ваш доступ ограничен администратором.", show_alert=True)
+                return None
+            if isinstance(event, Message):
+                await event.answer("⛔ Ваш доступ к боту ограничен администратором.")
+                return None
+            return None
 
         if isinstance(event, Message):
             text = event.text or ""
