@@ -26,7 +26,13 @@ def get_sync_url() -> str:
         raise RuntimeError(
             "Set DATABASE_URL or DB_URL for Alembic (e.g. postgresql://user:pass@host:5432/dbname)."
         )
-    return url.replace("postgresql+asyncpg://", "postgresql://").replace("+asyncpg", "")
+    url = url.replace("postgresql+asyncpg://", "postgresql://").replace("+asyncpg", "")
+    # Bare postgresql:// defaults to psycopg2 in SQLAlchemy; we ship psycopg3 (psycopg package).
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://") :]
+    return url
 
 
 def run_migrations_offline() -> None:

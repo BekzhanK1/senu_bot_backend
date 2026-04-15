@@ -7,11 +7,36 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import database.models_v2  # noqa: F401 — analytics_events + optional v2 tables
 from database.models import Base, BlockedUser, MentorEvent, Request, Tip, User
 
+
+def _normalize_async_db_url(url: str) -> str:
+    """
+    create_async_engine requires an async driver. Plain postgresql:// makes SQLAlchemy
+    use psycopg2 (sync), which is not installed — we use asyncpg instead.
+    """
+    url = url.strip()
+    if not url:
+        return url
+    if url.startswith("sqlite"):
+        if url.startswith("sqlite+aiosqlite://"):
+            return url
+        if url.startswith("sqlite://"):
+            return url.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        return url
+    scheme = url.split("://", 1)[0]
+    if "+asyncpg" in scheme or "+aiosqlite" in scheme:
+        return url
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://") :]
+    return url
+
+
 def _build_db_url() -> str:
     # 1) Direct URL has highest priority
     db_url = os.getenv("DB_URL")
     if db_url:
-        return db_url
+        return _normalize_async_db_url(db_url)
 
     # 2) Compose URL from individual Postgres fields in .env
     db_host = os.getenv("DB_HOST")
@@ -40,10 +65,10 @@ def _build_db_url() -> str:
         url = f"postgresql+asyncpg://{auth_part}@{db_host}:{db_port}/{db_name}"
         if db_sslmode:
             url = f"{url}?sslmode={quote_plus(db_sslmode)}"
-        return url
+        return _normalize_async_db_url(url)
 
     # 3) Backward-compatible fallback for local quick start
-    return "sqlite+aiosqlite:///senu_bot.db"
+    return _normalize_async_db_url("sqlite+aiosqlite:///senu_bot.db")
 
 
 DB_URL = _build_db_url()
