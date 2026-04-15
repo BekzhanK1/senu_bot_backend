@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Запись к Айнур</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #fff);
+            --text-color: var(--tg-theme-text-color, #000);
+            --hint-color: var(--tg-theme-hint-color, #999);
+            --button-color: var(--tg-theme-button-color, #3390ec);
+            --button-text-color: var(--tg-theme-button-text-color, #fff);
+            --secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h2 { margin-bottom: 10px; font-size: 1.2rem; }
+        p { color: var(--hint-color); font-size: 0.9rem; text-align: center; margin-bottom: 20px; }
+
+        .calendar {
+            width: 100%;
+            background: var(--secondary-bg);
+            border-radius: 15px;
+            padding: 15px;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+
+        .days-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+            text-align: center;
+        }
+
+        .day {
+            padding: 10px 5px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: 500;
+        }
+
+        .day:hover { background: rgba(0,0,0,0.05); }
+        .day.selected {
+            background-color: var(--button-color);
+            color: var(--button-text-color);
+        }
+
+        .time-slots {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .slot {
+            background: var(--secondary-bg);
+            padding: 12px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+
+        .slot.selected {
+            border-color: var(--button-color);
+            background: var(--bg-color);
+        }
+
+        #main-button {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: var(--button-color);
+            color: var(--button-text-color);
+            border: none;
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: bold;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>📅 Выбери время</h2>
+    <p>Выбери удобный день и слот для встречи с Айнур</p>
+
+    <div class="calendar">
+        <div class="days-grid" id="days">
+            <!-- Дни будут здесь -->
+        </div>
+    </div>
+
+    <div class="time-slots" id="slots">
+        <div class="slot" onclick="selectSlot(this)">10:00 - 11:00</div>
+        <div class="slot" onclick="selectSlot(this)">11:30 - 12:30</div>
+        <div class="slot" onclick="selectSlot(this)">14:00 - 15:00</div>
+        <div class="slot" onclick="selectSlot(this)">16:00 - 17:00</div>
+    </div>
+
+    <button id="main-button" onclick="sendData()">Подтвердить запись</button>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // Расширяем на весь экран
+
+        let selectedDay = null;
+        let selectedTime = null;
+
+        // Генерация дней (ближайшие 7 дней)
+        const daysContainer = document.getElementById('days');
+        const now = new Date();
+        for (let i = 1; i <= 7; i++) {
+            const date = new Date();
+            date.setDate(now.getDate() + i);
+            const dayElement = document.createElement('div');
+            dayElement.className = 'day';
+            dayElement.innerHTML = `<div>${date.toLocaleDateString('ru', {weekday: 'short'})}</div><b>${date.getDate()}</b>`;
+            dayElement.onclick = () => {
+                document.querySelectorAll('.day').forEach(d => d.classList.remove('selected'));
+                dayElement.classList.add('selected');
+                selectedDay = date.toLocaleDateString('ru', {day: 'numeric', month: 'long'});
+                checkSelection();
+            };
+            daysContainer.appendChild(dayElement);
+        }
+
+        function selectSlot(el) {
+            document.querySelectorAll('.slot').forEach(s => s.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedTime = el.innerText;
+            checkSelection();
+        }
+
+        function checkSelection() {
+            if (selectedDay && selectedTime) {
+                document.getElementById('main-button').style.display = 'block';
+            }
+        }
+
+        function sendData() {
+            const data = {
+                day: selectedDay,
+                time: selectedTime
+            };
+            tg.sendData(JSON.stringify(data)); // Отправляем данные боту
+        }
+    </script>
+</body>
+</html>
