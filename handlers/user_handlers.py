@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from typing import Any, Awaitable, Callable, Dict
 from aiogram import Router, F, Bot
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -15,6 +16,7 @@ from handlers.fsm_forms import MeetingForm, QuestionForm
 user_router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-domain.com/calendar")
+logger = logging.getLogger(__name__)
 
 
 class RequireStartMiddleware(BaseMiddleware):
@@ -36,6 +38,7 @@ class RequireStartMiddleware(BaseMiddleware):
                     username=user.username,
                     full_name=user.full_name
                 )
+                logger.info("User registered via /start: user_id=%s username=%s", user.id, user.username)
                 return await handler(event, data)
 
             # Mini App sendData arrives as WEB_APP_DATA message.
@@ -46,6 +49,7 @@ class RequireStartMiddleware(BaseMiddleware):
                     username=user.username,
                     full_name=user.full_name
                 )
+                logger.info("User registered via WEB_APP_DATA: user_id=%s username=%s", user.id, user.username)
                 return await handler(event, data)
 
         existing_user = await get_user(user.id)
@@ -87,25 +91,38 @@ async def cmd_start(message: Message):
 @user_router.message(F.content_type == ContentType.WEB_APP_DATA)
 async def process_webapp_data(message: Message, bot: Bot):
     try:
+        raw_data = message.web_app_data.data if message.web_app_data else None
+        logger.info(
+            "WEB_APP_DATA received: user_id=%s username=%s raw=%s",
+            message.from_user.id if message.from_user else None,
+            message.from_user.username if message.from_user else None,
+            raw_data,
+        )
+
         data = json.loads(message.web_app_data.data)
         data_type = data.get('type')
         user = message.from_user
         username = f"@{user.username}" if user.username else user.full_name
+        logger.info("WEB_APP_DATA parsed: user_id=%s type=%s", user.id, data_type)
         
         if data_type == 'meeting':
             day = data.get('day')
             time = data.get('time')
             content = f"📅 Встреча через Mini App\nДата: {day}\nВремя: {time}"
             req_id = await create_request(user.id, "meeting", content)
+            logger.info("Request created: id=%s type=meeting user_id=%s", req_id, user.id)
             
             admin_msg = f"🔔 <b>Новая запись: Встреча</b>\nОт: {user.full_name} ({username})\n<b>{day} в {time}</b>"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
+            logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
             await message.answer(f"✨ <b>Запись подтверждена!</b>\nЖдем тебя {day} в {time}.", parse_mode="HTML")
             
         elif data_type == 'game_108':
             req_id = await create_request(user.id, "game_108", "Заявка через Mini App")
+            logger.info("Request created: id=%s type=game_108 user_id=%s", req_id, user.id)
             admin_msg = f"🔔 <b>Новая заявка: Игра 108</b>\nОт: {user.full_name} ({username})"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
+            logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
             await message.answer("🙌 <b>Заявка на игру 108 принята!</b>\nАйнур скоро свяжется с тобой.", parse_mode="HTML")
 
         elif data_type == 'question':
@@ -113,15 +130,19 @@ async def process_webapp_data(message: Message, bot: Bot):
             is_anon = data.get('is_anonymous')
             q_type = "anonymous_question" if is_anon else "question"
             req_id = await create_request(user.id, q_type, text)
+            logger.info("Request created: id=%s type=%s user_id=%s", req_id, q_type, user.id)
             
             sender = "🕵️ Анонимно" if is_anon else f"👤 {user.full_name}"
             admin_msg = f"🔔 <b>Новый вопрос ({sender})</b>\nТекст: {text}"
             await bot.send_message(ADMIN_ID, admin_msg, reply_markup=get_admin_resolve_kb(req_id), parse_mode="HTML")
+            logger.info("Admin notified: request_id=%s admin_id=%s", req_id, ADMIN_ID)
             await message.answer("🚀 <b>Твой вопрос отправлен ментору!</b>", parse_mode="HTML")
         else:
+            logger.warning("Unknown WEB_APP_DATA type: user_id=%s payload=%s", user.id, data)
             await message.answer("❌ Неизвестный тип запроса из Mini App.")
 
     except Exception as e:
+        logger.exception("WEB_APP_DATA processing failed: error=%s", e)
         await message.answer(f"❌ Ошибка при обработке данных: {e}")
 
 # --- О менторе ---
