@@ -1,7 +1,7 @@
 """add app settings table
 
-Revision ID: v2_20260415_04
-Revises: v2_20250415_03
+Revision ID: v2_core_004
+Revises: v2_core_003
 Create Date: 2026-04-15
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "v2_20260415_04"
-down_revision: Union[str, None] = "v2_20250415_03"
+revision: str = "v2_core_004"
+down_revision: Union[str, None] = "v2_core_003"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

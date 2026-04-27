@@ -1,7 +1,7 @@
 """Dynamic content and menu system
 
-Revision ID: v2_20260427_05
-Revises: v2_20260415_04
+Revision ID: v2_core_005
+Revises: v2_core_004
 Create Date: 2026-04-27
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = 'v2_20260427_05'
-down_revision = 'v2_20260415_04_app_settings'
+revision = 'v2_core_005'
+down_revision = 'v2_core_004'
 branch_labels = None
 depends_on = None
 
