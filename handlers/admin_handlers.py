@@ -17,6 +17,7 @@ from keyboards.inline import get_admin_resolve_kb
 from utils.mentor_event_message import format_event_notification_html
 from utils.request_labels import format_request_type_ru
 from utils.student_notifications import notify_request_resolved
+from utils.role_service import is_admin, is_mentor
 
 admin_router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
@@ -36,7 +37,8 @@ class EventForm(StatesGroup):
 
 @admin_router.message(Command("new_event"))
 async def cmd_new_event(message: Message, state: FSMContext) -> None:
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     await state.set_state(EventForm.title)
     await message.answer(
@@ -49,7 +51,8 @@ async def cmd_new_event(message: Message, state: FSMContext) -> None:
 
 @admin_router.message(Command("cancel"), StateFilter(EventForm))
 async def event_form_cancel(message: Message, state: FSMContext) -> None:
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     await state.clear()
     await message.answer("Создание события отменено.")
@@ -57,7 +60,8 @@ async def event_form_cancel(message: Message, state: FSMContext) -> None:
 
 @admin_router.message(EventForm.title, F.text)
 async def event_form_title(message: Message, state: FSMContext) -> None:
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     if message.text and message.text.startswith("/"):
         await message.answer("Сейчас мастер создания события. Продолжи шаг или отправь /cancel.")
@@ -78,7 +82,8 @@ async def event_form_title(message: Message, state: FSMContext) -> None:
 
 @admin_router.message(EventForm.place, F.text)
 async def event_form_place(message: Message, state: FSMContext) -> None:
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     if message.text and message.text.startswith("/"):
         await message.answer("Сейчас мастер создания события. Продолжи шаг или отправь /cancel.")
@@ -100,7 +105,8 @@ async def event_form_place(message: Message, state: FSMContext) -> None:
 
 @admin_router.message(EventForm.description, F.text)
 async def event_form_description(message: Message, state: FSMContext, bot: Bot) -> None:
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     if message.text and message.text.startswith("/"):
         await message.answer("Сейчас мастер создания события. Продолжи шаг или отправь /cancel.")
@@ -149,7 +155,8 @@ async def event_form_description(message: Message, state: FSMContext, bot: Bot) 
 # Команда /admin для списка всех активных заявок
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_mentor(user_id):
         return
     
     requests = await get_pending_requests()
@@ -177,7 +184,8 @@ async def cmd_admin(message: Message):
 # Обработка кнопки "Ответить"
 @admin_router.callback_query(F.data.startswith("reply_"))
 async def process_reply_button(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
+    user_id = callback.from_user.id
+    if user_id != ADMIN_ID and not await is_mentor(user_id):
         return
     
     req_id = int(callback.data.split("_")[1])
@@ -189,7 +197,8 @@ async def process_reply_button(callback: CallbackQuery, state: FSMContext):
 # Получение текста ответа и отправка студенту
 @admin_router.message(AdminState.waiting_for_reply)
 async def send_reply_to_user(message: Message, state: FSMContext, bot: Bot):
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_mentor(user_id):
         return
     
     data = await state.get_data()
@@ -219,7 +228,8 @@ async def send_reply_to_user(message: Message, state: FSMContext, bot: Bot):
 
 @admin_router.callback_query(F.data.startswith("resolve_"))
 async def process_resolve(callback: CallbackQuery, bot: Bot):
-    if callback.from_user.id != ADMIN_ID:
+    user_id = callback.from_user.id
+    if user_id != ADMIN_ID and not await is_mentor(user_id):
         await callback.answer("У вас нет прав.")
         return
 
@@ -248,7 +258,8 @@ async def process_resolve(callback: CallbackQuery, bot: Bot):
 
 @admin_router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, bot: Bot):
-    if message.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID and not await is_admin(user_id):
         return
     
     command_parts = message.text.split(maxsplit=1)

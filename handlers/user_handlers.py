@@ -13,6 +13,7 @@ from keyboards.inline import get_admin_resolve_kb, get_back_kb, get_game_kb, get
 from keyboards.reply import get_main_menu
 from utils.request_labels import format_request_type_ru
 from utils.ux_copy import NOTIFY_ON_STATUS_CHANGE
+from utils.app_settings_service import get_cached_app_settings
 
 user_router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
@@ -25,16 +26,9 @@ user_router.callback_query.middleware(RequireStartMiddleware())
 
 @user_router.message(CommandStart())
 async def cmd_start(message: Message):
-    welcome_text = (
-        f"🌟 <b>Привет, {message.from_user.first_name}!</b>\n\n"
-        "Я бот SENU Buddy: помогаю связаться с ментором без лишних шагов. ✨\n\n"
-        "🚀 <b>Что здесь можно сделать:</b>\n"
-        "• <b>🆘 Мне тяжело сейчас</b> — короткая поддержка и связь с ментором\n"
-        "• Записаться на встречу или задать вопрос (в т.ч. анонимно)\n"
-        "• Игра «108», совет дня, контакты PCS\n\n"
-        "Все заявки идут ментору; <b>когда статус заявки изменится, я напишу тебе сюда</b>.\n\n"
-        "Выбери раздел в меню ниже 👇"
-    )
+    settings = await get_cached_app_settings()
+    first_name = message.from_user.first_name if message.from_user else "Студент"
+    welcome_text = settings["welcome_message"].replace("{first_name}", first_name)
     await message.answer(welcome_text, reply_markup=get_main_menu(), parse_mode="HTML")
 
 # --- Mini App Data Handler ---
@@ -110,15 +104,9 @@ async def process_webapp_data(message: Message, bot: Bot):
 
 @user_router.message(F.text == "💎 Ментор Айнур")
 async def about_mentor(message: Message):
-    photo_url = os.getenv("MENTOR_PHOTO_URL")
-    text = (
-        "👑 <b>Айнур — твой проводник и ментор</b>\n\n"
-        "🎓 <i>Bolashak alumni, выпускница George Washington University (GWU)</i>\n"
-        "🏢 <i>Многолетний опыт работы в Nazarbayev University</i>\n"
-        "🧘 <i>Сертифицированный фасилитатор трансформационной игры «108»</i>\n\n"
-        "Айнур помогает студентам NU находить внутренний баланс, строить академическую траекторию.\n\n"
-        "<b>Твои перемены начинаются здесь!</b>"
-    )
+    settings = await get_cached_app_settings()
+    photo_url = settings["mentor_photo_url"] or os.getenv("MENTOR_PHOTO_URL")
+    text = settings["mentor_about_text"]
     try:
         if photo_url:
             await message.answer_photo(photo=photo_url, caption=text, parse_mode="HTML")
@@ -206,7 +194,12 @@ async def meeting_time(message: Message, state: FSMContext, bot: Bot):
 
 @user_router.message(F.text == "🚑 Помощь (PCS)")
 async def pcs_help(message: Message):
-    text = "<b>🆘 Психологическая помощь (PCS)</b>\n\n• Бот: @pcs_nu_bot\n• Телефон доверия: <b>111</b>"
+    settings = await get_cached_app_settings()
+    text = (
+        "<b>🆘 Психологическая помощь (PCS)</b>\n\n"
+        f"• Бот: {settings['support_bot_username']}\n"
+        f"• Телефон доверия: <b>{settings['support_hotline']}</b>"
+    )
     await message.answer(text, parse_mode="HTML")
 
 @user_router.message(F.text == "🎭 Игра «108»")

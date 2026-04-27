@@ -13,6 +13,7 @@ from database.db import (
     block_user,
     create_mentor_event,
     create_request,
+    get_app_settings,
     get_all_users,
     get_all_users_ids,
     get_blocked_user_ids,
@@ -23,6 +24,7 @@ from database.db import (
     is_user_blocked,
     resolve_request,
     unblock_user,
+    update_app_settings,
 )
 from keyboards.inline import get_admin_resolve_kb
 from database.meetings_repo import (
@@ -44,6 +46,9 @@ from utils.meeting_messages import (
 )
 from utils.mentor_event_message import format_event_notification_html
 from utils.student_notifications import notify_request_resolved
+from utils.app_settings_service import invalidate_app_settings_cache
+from utils.role_service import is_admin, is_mentor
+from api_admin_extended import create_admin_extended_router
 
 
 class TgUserPayload(BaseModel):
@@ -153,6 +158,27 @@ class AdminMeetingActionRequest(BaseModel):
     tg_user_id: int
 
 
+class AppSettingsData(BaseModel):
+    welcome_message: str = Field(min_length=10, max_length=4096)
+    mentor_about_text: str = Field(min_length=10, max_length=4096)
+    mentor_photo_url: str = Field(default="", max_length=1000)
+    support_bot_username: str = Field(default="@pcs_nu_bot", min_length=3, max_length=128)
+    support_hotline: str = Field(default="111", min_length=1, max_length=64)
+    miniapp_home_title: str = Field(min_length=3, max_length=256)
+    miniapp_home_footer: str = Field(min_length=3, max_length=256)
+
+
+class AdminSettingsUpdateRequest(BaseModel):
+    tg_user_id: int
+    settings: AppSettingsData
+
+
+class AdminSettingsResponse(BaseModel):
+    settings: AppSettingsData
+    updated_by: Optional[int] = None
+    updated_at: Optional[datetime] = None
+
+
 class ProfileRequest(BaseModel):
     tg_user_id: int
     username: Optional[str] = None
@@ -192,8 +218,11 @@ def create_api_app(bot: Bot) -> FastAPI:
         if internal_token and x_internal_token != internal_token:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-    def verify_admin_user(user_id: int) -> None:
-        if user_id != admin_id:
+    async def verify_admin_user(user_id: int) -> None:
+        """Verify user has admin access (legacy ADMIN_ID or database role)."""
+        if user_id == admin_id:
+            return
+        if not await is_admin(user_id):
             raise HTTPException(status_code=403, detail="Admin access required")
 
     @app.get("/health")
@@ -374,7 +403,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> AdminRequestsResponse:
         await verify_token(x_internal_token)
-        verify_admin_user(tg_user_id)
+        await verify_admin_user(tg_user_id)
 
         rows = await get_requests_for_admin(request_type=request_type, status=status, limit=300)
         items = [
@@ -399,7 +428,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         req = await get_request_by_id(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -420,7 +449,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         req = await get_request_by_id(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -439,7 +468,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> AdminEventCreateResponse:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         title = payload.title.strip()[:256]
         place = payload.place.strip()[:256]
         description = payload.description.strip()[:3500]
@@ -463,7 +492,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool | int]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         text = escape(payload.text.strip())
         broadcast_html = f"📢 <b>Объявление от ментора:</b>\n\n{text}"
         if len(broadcast_html) > 4096:
@@ -484,7 +513,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> AdminUsersResponse:
         await verify_token(x_internal_token)
-        verify_admin_user(tg_user_id)
+        await verify_admin_user(tg_user_id)
         users = await get_all_users(limit=1000)
         blocked_ids = await get_blocked_user_ids()
         items = [
@@ -506,7 +535,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         if telegram_id == admin_id:
             raise HTTPException(status_code=400, detail="Cannot block admin")
         await block_user(telegram_id, payload.reason)
@@ -519,7 +548,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         await unblock_user(telegram_id)
         return {"ok": True}
 
@@ -529,7 +558,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         await verify_token(x_internal_token)
-        verify_admin_user(tg_user_id)
+        await verify_admin_user(tg_user_id)
         row = await get_schedule_settings()
         return {
             "weekly_hours": row.weekly_hours,
@@ -543,7 +572,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         try:
             weekly = {str(k): dict(v) for k, v in payload.weekly_hours.items()}
             await update_schedule_settings(
@@ -561,7 +590,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         await verify_token(x_internal_token)
-        verify_admin_user(tg_user_id)
+        await verify_admin_user(tg_user_id)
         sched = await get_schedule_settings()
         tz = ZoneInfo(sched.timezone)
         today = datetime.now(tz).date()
@@ -594,7 +623,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         b = await confirm_meeting_booking(booking_id)
         if b is None:
             raise HTTPException(status_code=404, detail="Booking not found or not pending")
@@ -617,7 +646,7 @@ def create_api_app(bot: Bot) -> FastAPI:
         x_internal_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
         await verify_token(x_internal_token)
-        verify_admin_user(payload.tg_user_id)
+        await verify_admin_user(payload.tg_user_id)
         b = await complete_meeting_booking(booking_id)
         if b is None:
             raise HTTPException(status_code=404, detail="Booking not found or not confirmed")
@@ -632,5 +661,52 @@ def create_api_app(bot: Bot) -> FastAPI:
         except Exception:
             pass
         return {"ok": True}
+
+    @app.get("/api/admin/settings", response_model=AdminSettingsResponse)
+    async def admin_settings_get(
+        tg_user_id: int = Query(...),
+        x_internal_token: str | None = Header(default=None),
+    ) -> AdminSettingsResponse:
+        await verify_token(x_internal_token)
+        await verify_admin_user(tg_user_id)
+        settings, updated_by, updated_at = await get_app_settings()
+        return AdminSettingsResponse(
+            settings=AppSettingsData(**settings),
+            updated_by=updated_by,
+            updated_at=updated_at,
+        )
+
+    @app.put("/api/admin/settings", response_model=AdminSettingsResponse)
+    async def admin_settings_put(
+        payload: AdminSettingsUpdateRequest,
+        x_internal_token: str | None = Header(default=None),
+    ) -> AdminSettingsResponse:
+        await verify_token(x_internal_token)
+        await verify_admin_user(payload.tg_user_id)
+        settings, updated_by, updated_at = await update_app_settings(
+            payload.settings.model_dump(),
+            updated_by=payload.tg_user_id,
+        )
+        invalidate_app_settings_cache()
+        return AdminSettingsResponse(
+            settings=AppSettingsData(**settings),
+            updated_by=updated_by,
+            updated_at=updated_at,
+        )
+
+    @app.get("/api/settings/public")
+    async def public_settings(
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        await verify_token(x_internal_token)
+        settings, _, _ = await get_app_settings()
+        return {
+            "miniapp_home_title": settings["miniapp_home_title"],
+            "miniapp_home_footer": settings["miniapp_home_footer"],
+        }
+
+    # Include extended admin router
+    extended_router = create_admin_extended_router(bot, internal_token)
+    app.include_router(extended_router)
 
     return app

@@ -41,6 +41,7 @@ class Role(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
+    permissions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string of permissions
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
