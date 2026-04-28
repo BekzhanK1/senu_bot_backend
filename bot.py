@@ -11,6 +11,7 @@ from handlers.crisis_handlers import crisis_router
 from handlers.user_handlers import user_router
 from handlers.admin_handlers import admin_router
 from api_server import create_api_app
+from services.container import init_services
 
 async def set_main_menu(bot: Bot):
     main_menu_commands = [
@@ -35,6 +36,10 @@ async def main():
     await init_db()
     
     bot = Bot(token=token)
+    
+    # Initialize service container
+    init_services(bot)
+    
     dp = Dispatcher()
     api_app = create_api_app(bot)
     
