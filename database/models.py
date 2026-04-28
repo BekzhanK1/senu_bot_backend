@@ -106,33 +106,3 @@ class AppSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
-class DynamicContent(Base):
-    """Dynamic content for bot messages, buttons, and UI elements."""
-
-    __tablename__ = "dynamic_content"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_type: Mapped[str] = mapped_column(String(32), default="text")  # text, html, markdown
-    category: Mapped[str] = mapped_column(String(64), default="general")  # general, crisis, menu, notification
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    updated_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-
-
-class MenuButton(Base):
-    """Dynamic menu buttons configuration."""
-
-    __tablename__ = "menu_buttons"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    text: Mapped[str] = mapped_column(String(128), nullable=False)
-    action_type: Mapped[str] = mapped_column(String(32), nullable=False)  # command, webapp, callback
-    action_value: Mapped[str] = mapped_column(String(256), nullable=False)
-    position: Mapped[int] = mapped_column(Integer, default=0)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    icon: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    required_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
