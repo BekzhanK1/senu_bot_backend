@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Header, HTTPException, Depends
 from pydantic import BaseModel, Field
+from typing import Optional
 from sqlalchemy import select
 
 from database.db import async_session
