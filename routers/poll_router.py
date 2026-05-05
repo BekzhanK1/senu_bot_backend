@@ -24,6 +24,7 @@ class VotePayload(BaseModel):
 
 class PollCreatePayload(BaseModel):
     title: str = Field(min_length=1, max_length=256)
+    topics: List[str] = Field(default_factory=list)
 
 @router.get("/poll")
 async def get_active_poll(x_internal_token: str | None = Header(default=None)):
@@ -38,9 +39,10 @@ async def get_active_poll(x_internal_token: str | None = Header(default=None)):
         if not poll:
             return {"active": False, "poll": None}
             
-        # Get topics for this poll
-        topics_result = await session.execute(select(PollTopic).where(PollTopic.poll_id == poll.id))
-        topics = topics_result.scalars().all()
+        # Get topics with user details
+        topics_query = select(PollTopic, User.full_name).outerjoin(User, PollTopic.suggested_by == User.telegram_id).where(PollTopic.poll_id == poll.id)
+        topics_result = await session.execute(topics_query)
+        topics = topics_result.all()
         
         # Get votes count per topic
         votes_result = await session.execute(
@@ -51,12 +53,13 @@ async def get_active_poll(x_internal_token: str | None = Header(default=None)):
         votes_map = {row[0]: row[1] for row in votes_result.all()}
         
         topics_data = []
-        for t in topics:
+        for t, author_name in topics:
             topics_data.append({
                 "id": t.id,
                 "title": t.title,
                 "votes": votes_map.get(t.id, 0),
-                "suggested_by": t.suggested_by
+                "suggested_by": t.suggested_by,
+                "author_name": author_name
             })
             
         return {
@@ -134,6 +137,12 @@ async def create_poll(payload: PollCreatePayload, x_internal_token: str | None =
         
         new_poll = GroupPoll(title=payload.title, is_active=True)
         session.add(new_poll)
+        await session.flush()  # To get new_poll.id
+        
+        for topic_title in payload.topics:
+            if topic_title.strip():
+                session.add(PollTopic(poll_id=new_poll.id, title=topic_title.strip(), suggested_by=None))
+                
         await session.commit()
         return {"ok": True, "poll_id": new_poll.id}
 
