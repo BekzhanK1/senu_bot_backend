@@ -106,3 +106,46 @@ class AppSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class GroupPoll(Base):
+    __tablename__ = "group_polls"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    topics = relationship("PollTopic", back_populates="poll", cascade="all, delete-orphan")
+
+
+class PollTopic(Base):
+    __tablename__ = "poll_topics"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    poll_id: Mapped[int] = mapped_column(Integer, ForeignKey("group_polls.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    suggested_by: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.telegram_id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    poll = relationship("GroupPoll", back_populates="topics")
+    votes = relationship("PollVote", back_populates="topic", cascade="all, delete-orphan")
+
+
+class PollVote(Base):
+    __tablename__ = "poll_votes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    poll_id: Mapped[int] = mapped_column(Integer, ForeignKey("group_polls.id", ondelete="CASCADE"))
+    topic_id: Mapped[int] = mapped_column(Integer, ForeignKey("poll_topics.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    topic = relationship("PollTopic", back_populates="votes")
+
+
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id", ondelete="CASCADE"))
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

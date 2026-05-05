@@ -14,6 +14,8 @@ from routers.requests_router import router as requests_router
 from routers.admin_router import router as admin_router
 from routers.meetings_router import router as meetings_router
 from routers.settings_router import router as settings_router
+from routers.poll_router import router as poll_router
+from routers.feedback_router import router as feedback_router
 from api_admin_extended import create_admin_extended_router
 
 
@@ -47,6 +49,8 @@ def create_api_app(bot: Bot) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(meetings_router)
     app.include_router(settings_router)
+    app.include_router(poll_router)
+    app.include_router(feedback_router)
     
     # Include extended admin router (mentors, roles, etc.)
     internal_token = os.getenv("INTERNAL_API_TOKEN")

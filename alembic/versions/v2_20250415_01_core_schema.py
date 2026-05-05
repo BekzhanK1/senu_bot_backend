@@ -158,7 +158,7 @@ def upgrade() -> None:
         sa.Column("event_name", sa.String(length=128), nullable=False),
         sa.Column("actor_id_hash", sa.String(length=64), nullable=True),
         sa.Column("case_id", sa.Integer(), nullable=True),
-        sa.Column("metadata", sa.JSON(), server_default=sa.text("'{}'::json"), nullable=False),
+        sa.Column("metadata", sa.JSON(), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=True),
         sa.ForeignKeyConstraint(["case_id"], ["cases.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
@@ -190,7 +190,7 @@ def upgrade() -> None:
         sa.Column("action", sa.String(length=128), nullable=False),
         sa.Column("entity_type", sa.String(length=64), nullable=False),
         sa.Column("entity_id", sa.String(length=64), nullable=True),
-        sa.Column("details", sa.JSON(), server_default=sa.text("'{}'::json"), nullable=False),
+        sa.Column("details", sa.JSON(), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
